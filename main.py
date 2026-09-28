@@ -1,7 +1,6 @@
 from pathlib import Path
 import csv
-from openpyxl import load_workbook
-from openpyxl import Workbook
+from openpyxl import load_workbook, Workbook
 from dataclasses import dataclass
 import re
 
@@ -11,21 +10,30 @@ OUTPUT_FOLDER = BASE_FOLDER / "output"
 REPORTS_FOLDER = BASE_FOLDER / "reports"
 
 REQUIRED_FIELDS = ("name", "email", "amount")
+
+# Basic email validation for practical data cleaning.
+# This checks for text@text.domain without attempting full RFC validation.
 EMAIL_PATTERN = re.compile(
     r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
 )
 
+
 @dataclass
 class RecordResult:
+    """Store a record together with its processing status and source details."""
+
     record: dict
     status: str
     source_file: str | None = None
     reason: str | None = None
 
+
 def find_input_files():
+    """Return supported CSV and XLSX files from the input folder."""
+
     if not INPUT_FOLDER.exists():
         return []
-        
+
     return sorted(
         file_path
         for file_path in INPUT_FOLDER.iterdir()
@@ -33,15 +41,18 @@ def find_input_files():
         and file_path.suffix.lower() in {".csv", ".xlsx"}
     )
 
+
 def read_csv_file(file_path):
+    """Read a CSV file and wrap each row in a RecordResult."""
+
     records = []
 
     with open(file_path, "r", newline="", encoding="utf-8") as file:
         reader = csv.DictReader(file)
-        
+
         if reader.fieldnames is None:
             return []
-        
+
         for row in reader:
             records.append(
                 RecordResult(
@@ -52,8 +63,11 @@ def read_csv_file(file_path):
             )
 
     return records
-   
+
+
 def read_xlsx_file(file_path):
+    """Read the active worksheet from an XLSX file into RecordResult objects."""
+
     workbook = load_workbook(file_path, data_only=True)
     worksheet = workbook.active
 
@@ -67,9 +81,10 @@ def read_xlsx_file(file_path):
     records = []
 
     for row in rows[1:]:
+        # Ignore completely empty spreadsheet rows.
         if all(value is None for value in row):
             continue
-            
+
         record = dict(zip(headers, row))
 
         records.append(
@@ -84,25 +99,31 @@ def read_xlsx_file(file_path):
 
     return records
 
+
 def read_files():
+    """Read all supported input files and combine their records."""
+
     files = find_input_files()
     all_records = []
-       
+
     for file_path in files:
         extension = file_path.suffix.lower()
-        
+
         if extension == ".csv":
             records = read_csv_file(file_path)
         elif extension == ".xlsx":
             records = read_xlsx_file(file_path)
         else:
             continue
-            
+
         all_records.extend(records)
-    
+
     return all_records
-    
+
+
 def normalize_columns(records):
+    """Normalize column names and reject records with invalid headers."""
+
     for result in records:
         normalized_record = {}
 
@@ -113,12 +134,12 @@ def normalize_columns(records):
                 break
 
             normalized_header = header.strip().lower().replace(" ", "_")
-            
+
             if not normalized_header:
                 result.status = "failed"
                 result.reason = "Empty header"
                 break
-                
+
             normalized_record[normalized_header] = value
 
         if result.status != "failed":
@@ -126,12 +147,15 @@ def normalize_columns(records):
             result.status = "normalized"
 
     return records
-    
+
+
 def clean_records(records):
+    """Validate required fields and normalize record values."""
+
     for result in records:
         if result.status == "failed":
             continue
-        
+
         for field in REQUIRED_FIELDS:
             value = result.record.get(field)
 
@@ -139,10 +163,10 @@ def clean_records(records):
                 result.status = "failed"
                 result.reason = f"Missing required field: {field}"
                 break
-        
+
         if result.status == "failed":
             continue
-        
+
         cleaned_record = {}
 
         for header, value in result.record.items():
@@ -173,30 +197,37 @@ def clean_records(records):
 
     return records
 
+
 def remove_duplicates(records):
+    """Validate email addresses and mark duplicate emails."""
+
     seen_emails = set()
-        
+
     for result in records:
         if result.status == "failed":
             continue
-            
+
         email = result.record.get("email")
-        
+
         if not isinstance(email, str) or not EMAIL_PATTERN.fullmatch(email):
             result.status = "failed"
             result.reason = "Invalid email"
             continue
-        
+
+        # Email is used as the unique identifier for duplicate detection.
         if email in seen_emails:
             result.status = "duplicate"
             result.reason = "Duplicate email"
             continue
-            
+
         seen_emails.add(email)
-        
+
     return records
 
+
 def write_cleaned_excel(records):
+    """Write all valid records to output/cleaned_data.xlsx."""
+
     valid_records = [
         result for result in records
         if result.status == "valid"
@@ -212,6 +243,8 @@ def write_cleaned_excel(records):
     worksheet = workbook.active
     worksheet.title = "Cleaned Data"
 
+    # Preserve every column encountered in valid records so optional
+    # client-specific fields are not discarded during cleaning.
     headers = []
 
     for result in valid_records:
@@ -234,24 +267,27 @@ def write_cleaned_excel(records):
     workbook.close()
 
     print("Cleaned Excel file created successfully.")
-    
+
+
 def write_error_report(records):
+    """Write failed and duplicate records to reports/error_report.csv."""
+
     error_records = [
         result for result in records
         if result.status in {"failed", "duplicate"}
     ]
-    
+
     if not error_records:
         print("No errors or duplicates found during operation")
         return
-    
+
     REPORTS_FOLDER.mkdir(parents=True, exist_ok=True)
-    
+
     report_path = REPORTS_FOLDER / "error_report.csv"
-    
+
     with open(report_path, "w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
-        
+
         writer.writerow([
             "source_file",
             "status",
@@ -260,7 +296,7 @@ def write_error_report(records):
             "email",
             "amount"
         ])
-        
+
         for result in error_records:
             writer.writerow([
                 result.source_file,
@@ -270,22 +306,26 @@ def write_error_report(records):
                 result.record.get("email"),
                 result.record.get("amount")
             ])
-            
+
     print("Error report created successfully.")
-    
+
+
 def main():
+    """Run the complete cleaning and reporting workflow."""
+
     records = read_files()
-    
+
     if not records:
         print("No records found.")
         return
-        
+
     records = normalize_columns(records)
     records = clean_records(records)
     records = remove_duplicates(records)
-    
+
     write_cleaned_excel(records)
     write_error_report(records)
+
 
 if __name__ == "__main__":
     main()
