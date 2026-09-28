@@ -1,0 +1,9 @@
+ Name , EMAIL ,Amount,State,Notes
+ Alice Smith , ALICE@EXAMPLE.COM ,42.50, ar , extra spaces + uppercase email 
+Bob Jones,bob@example.com,banana,tn,invalid amount
+Carol Lee,not-an-email,19.99,ca,invalid email
+,missingname@example.com,15.00,ny,missing required name
+Dana Reed,,17.00,wa,missing required email
+Evan Cole,evan@example.com,,tx,missing required amount
+Frank Hall,frank@example.com,25,,state is optional
+Grace Kim,grace@example.com,31.75,fl,valid extra column retained
